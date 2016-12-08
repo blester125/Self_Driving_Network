@@ -8,4 +8,5 @@ Data was extracted from ROSbag's using https://github.com/rwightman/udacity-driv
 Data is expected to be in ./data/output/[1-6]/center for images and ./data/output/[1-6]/interpolated.csv for steering angles
 
 A quick example is shown here
+
 ![example](example.gif)
