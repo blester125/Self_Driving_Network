@@ -1,0 +1,11 @@
+Ch2_001/*
+data/*
+log/*
+udacity-driving-reader-master/*
+Ch2_001.tar.gz
+Ch2_002.tar.gz
+test.py
+*.pyc
+angle_ex.txt
+checkpoint*
+model.pkl*
