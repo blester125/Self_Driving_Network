@@ -9,3 +9,4 @@ test.py
 angle_ex.txt
 checkpoint*
 model.pkl*
+MNIST_data/*

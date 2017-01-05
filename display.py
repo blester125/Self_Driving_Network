@@ -65,6 +65,7 @@ def generate_one_dataset(X_train, y_train, path):
 	y_train.extend(angles)
 	return X_train, y_train
 
+#Change this to normalize over the whole train set not just itself
 def normalize_image(image):
 	norm_image = copy.deepcopy(image)
 	norm_image = cv2.normalize(
@@ -127,36 +128,36 @@ class Model():
 		self.sess.run(tf.initialize_all_variables())
 
 	def train(self):
-		#for epoch in range(100):
-		#while l > .5 and epoch < 1500:
-		offset = 0
-		while offset < 12:# len(self.X_train):
-			l = 200
-			epoch = 0
-			X_batch, y_batch = load_minibatch(self.X_train, self.y_train, offset)
-			while l > .05 and epoch < 5000:
+		for epoch in range(10000):
+			#while l > .5 and epoch < 1500:
+			offset = 0
+			l = 0
+			while offset < len(self.X_train):
+				#l = 200
+				#epoch = 0
+				X_batch, y_batch = load_minibatch(self.X_train, self.y_train, offset)
+				#while l > .05 and epoch < 5000:
 				# Train
-				test_v = [v for v in tf.all_variables()if v.name == "conv1_weights:0"]
+				#test_v = [v for v in tf.all_variables()if v.name == "conv1_weights:0"]
 				#print(test_v)
-				test_v = test_v[0]
-				a = self.sess.run(test_v)
-				_, l, summary, pred, test = self.sess.run([self.train_op, self.loss, self.summary_op, self.prediction, tf.transpose(tf.reshape(self.prediction, [-1]))], feed_dict={self.X: X_batch, self.y: y_batch, self.keep_prob: 0.1})
-				b = self.sess.run(test_v)
-				print(np.array_equal(a, b))
-				print(test)
-				print("MiniBatch loss:", l)
+				#test_v = test_v[0]
+				#a = self.sess.run(test_v)
+				_, l, summary = self.sess.run([self.train_op, self.loss, self.summary_op], feed_dict={self.X: X_batch, self.y: y_batch, self.keep_prob: 0.1})
+				#b = self.sess.run(test_v)
+				#print(np.array_equal(a, b))
+				#print(test)
+				#print("MiniBatch loss:", l)
 				
 				self.writer.add_summary(summary, offset)
-				#if (epoch + 1) % 1 == 0:
-				print("Epoch:", epoch, "Loss:", l)
-				epoch += 1
+				#print("Finished minibatch with offset", offset)
+				# Update
+				offset = min(offset + BATCH_SIZE, len(self.X_train))
+			#if (epoch) % 50 == 0:
+			print("Epoch:", epoch, "Loss:", l)
 			self.saver.save(self.sess, "model.pkl")
-			#print("Finished minibatch with offset", offset)
-			# Update
-			offset = min(offset + BATCH_SIZE, len(X_train))
 
-		test = self.sess.run([self.prediction], feed_dict={self.X: X_batch, self.keep_prob:1.0})
-		print(test)
+		#test = self.sess.run([self.prediction], feed_dict={self.X: X_batch, self.keep_prob:1.0})
+		#print(test)
 		print("Optimization Finished!")
 		self.saver.save(self.sess, "model.pkl")
 
@@ -168,6 +169,23 @@ class Model():
 		return angle
 		
 		
+# TODO
+# Add Dropout
+# Rename stuff
+# Add Scopes
+# Divide res layers
+# Add res layers
+# initialize to better weights?
+# add more FC layers to reduce final layer fan in
+# Change Conv -> FC change to use convolutions
+# Added variables to FC lates
+# Use leaky relu
+
+# Use batch norm
+# Add LSTM or Gated Conv to the Fully connected parts
+# Predict more than steering angle, throttle and brake?
+# Use a small set of images to predict, like last 5 - 3D convolution
+
 def inference(images, keep_prob):
 	INPUT_DEPTH = 3
 	DEPTH1 = 16
@@ -212,6 +230,7 @@ def inference(images, keep_prob):
 	step = tf.nn.relu(conv2d(step, weightsres2, type="SAME") + biasesres2)
 
 	step2 = tf.add(step, res)
+	# step2 = tf.div(step2, 2.0)
 
 	# 3x3 - 32
 	weightsc2 = tf.get_variable(
@@ -405,11 +424,11 @@ def max_pool_2x2(x, number):
 				name='pool' + str(number))
 
 if __name__ == "__main__":
-	paths = ["data/output/1"]#, 
-	# 	"data/output/2", 
-	# 	"data/output/4",
-	# 	"data/output/5",
-	# 	"data/output/6"]
+	paths = ["data/output/1", 
+	 	"data/output/2", 
+	 	"data/output/4",
+	 	"data/output/5",
+	 	"data/output/6"]
 	X_train, y_train = generate_dataset(paths)
 	sess = tf.Session()
 	network = Model(sess, X_train, y_train)
