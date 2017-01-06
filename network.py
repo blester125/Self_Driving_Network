@@ -8,7 +8,9 @@ from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.contrib.layers.python.layers import batch_norm as batch_norm
 
-# This function will be useful when I get Batch normalization working
+##
+# Convolutions
+
 def convolution2D(
 		x, 
 		output_depth,
@@ -16,11 +18,13 @@ def convolution2D(
 		strides=[1, 1], 
 		padding='SAME',
 		name="convlution",
+		phase_train=tf.constant(False),
+		use_batch_norm=False,
 		weight_decay=0.0,
 		stddev=1e-1
 		):
 	with tf.variable_scope(name):
-		input_depth = x.get_shape()[3]
+		input_depth = x.get_shape()[-1]
 		regularizer = lambda t: l2_loss(t, weight=weight_decay)
 		kernel = tf.get_variable(
 			"weights",
@@ -32,6 +36,8 @@ def convolution2D(
 			regularizer=regularizer,
 			dtype=x.dtype)
 		conv = tf.nn.conv2d(x, kernel, [1, strides[0], strides[1], 1], padding=padding)
+		if use_batch_norm:
+			conv = batch_norm(conv, phase_train)
 	return conv
 
 def convolution_and_bias(
@@ -45,7 +51,7 @@ def convolution_and_bias(
 		stddev=1e-1
 		):
 	with tf.variable_scope(name):
-		input_depth = x.get_shape()[3]
+		input_depth = x.get_shape()[-1]
 		regularizer = lambda t: l2_loss(t, weight=weight_decay)
 		kernel = tf.get_variable(
 			"weights",
@@ -64,7 +70,107 @@ def convolution_and_bias(
 		activation = conv + biases
 	return activation
 
-# Still working to get batchnorm to work well
+# This uses a ReLU for the midpoint activation and no final activation
+def residual_block(
+		x,
+		output_depth,
+		kernel_size,
+		strides=[1, 1],
+		padding='SAME',
+		name="ResNet",
+		phase_train=tf.constant(False),
+		use_batch_norm=False,
+		weight_decay=0.0,
+		stddev=1e-1):
+	with tf.variable_scope(name):
+		with tf.variable_scope("Convolution1"):
+			input_depth = x.get_shape()[-1]
+			regularizer = lambda t: l2_loss(t, weight=weight_decay)
+			kernel = tf.get_variable(
+				"weights",
+				[kernel_size[0],
+				 kernel_size[1],
+				 input_depth,
+				 output_depth],
+				initializer=tf.truncated_normal_initializer(stddev=stddev),
+				regularizer=regularizer,
+				dtype=x.dtype)
+			conv = tf.nn.conv2d(x, kernel, [1, strides[0], strides[1], 1], padding=padding)
+			if use_batch_norm is False:
+				biases = tf.get_variable(
+					initializer=tf.constant(0.1, shape=[output_depth]), 
+					name="biases", 
+					dtype=x.dtype)
+				activation = conv + biases
+			else:
+				activation = batch_norm(conv, phase_train)
+			output = tf.nn.relu(activation)
+		with tf.variable_scope("Convolution2"):
+			regularizer = lambda t: l2_loss(t, weight=weight_decay)
+			kernel = tf.get_variable(
+				"weights",
+				[kernel_size[0],
+				 kernel_size[1],
+				 output_depth,
+				 output_depth],
+				initializer=tf.truncated_normal_initializer(stddev=stddev),
+				regularizer=regularizer,
+				dtype=x.dtype)
+			conv = tf.nn.conv2d(output, kernel, [1, strides[0], strides[1], 1], padding=padding)
+			if use_batch_norm is False:
+				biases = tf.get_variable(
+					initializer=tf.constant(0.1, shape=[output_depth]), 
+					name="biases", 
+					dtype=x.dtype)
+				activation = conv + biases
+			else:
+				activation = batch_norm(conv, phase_train)
+		res = x + activation
+	return res
+
+
+##
+# Regularization
+
+def l2_loss(tensor, weight=1.0, name=None):
+	with tf.name_scope(name):
+		weight = tf.convert_to_tensor(weight, dtype=tensor.dtype.base_dtype, name='loss_weight')
+		loss = tf.mul(weight, tf.nn.l2_loss(tensor), name='value')
+	return loss
+
+def batch_norm(x, phase_train, decay=0.5, epsilon=1e-3):
+	with tf.variable_scope("Batch_Norm"):
+		#phase_train = tf.convert_to_tensor(phase_train, dtype=tf.bool)
+		n_out = int(x.get_shape()[-1])
+		beta = tf.Variable(
+					tf.constant(0.1, shape=[n_out], dtype=x.dtype), 
+					name="beta", 
+					trainable=True, 
+					dtype=x.dtype
+				)
+		gamma = tf.Variable(
+					tf.constant(0.1, shape=[n_out], dtype=x.dtype), 
+					name="gamma", 
+					trainable=True, 
+					dtype=x.dtype
+				)
+		batch_mean, batch_var = tf.nn.moments(x, [0, 1, 2], name='moments')
+		ema = tf.train.ExponentialMovingAverage(decay=decay)
+		def mean_var_with_update():
+			ema_apply_op = ema.apply([batch_mean, batch_var])
+			with tf.control_dependencies([ema_apply_op]):
+				return tf.identity(batch_mean), tf.identity(batch_var)
+		mean, var = control_flow_ops.cond(phase_train,
+										  mean_var_with_update,
+										  lambda: (ema.average(batch_mean), ema.average(batch_var)))
+		normed = tf.nn.batch_normalization(x, mean, var, beta, gamma, epsilon)
+	return normed
+
+# Both of these functions tried to use the tf.contrib.layers.batch_norm in order 
+# to do batch normalization, how over this does not allow for setting the initial 
+# value of beta and gamma. They are defaulted to 0 and 1 each. These values were 
+# causing huge error on the MNIST example I wrote. Using 0.1 for each however 
+# caused good results.
 # def convolution2D(
 # 		x, 
 # 		output_depth,
@@ -92,6 +198,33 @@ def convolution_and_bias(
 # 			scope='cnn'
 # 			)
 # 	return conv
+#
+# def batch_norm_layer(x,train_phase,scope_bn):
+# 	bn_train = batch_norm(
+# 		x, 
+# 		decay=0.9, 
+# 		center=True, 
+# 		scale=True,
+# 		is_training=True,
+# 		reuse=None,
+# 		trainable=True,
+# 		scope=scope_bn,
+# 		updates_collections=None)
+# 	bn_inference = batch_norm(
+# 		x, 
+# 		decay=0.9, 
+# 		center=True, 
+# 		scale=True,
+# 		is_training=False,
+# 		reuse=True,
+# 		trainable=True,
+# 		scope=scope_bn,
+# 		updates_collections=None)
+# 	z = tf.cond(train_phase, lambda: bn_train, lambda: bn_inference)
+# 	return z
+
+##
+# Normal layer
 
 def fully_connected(x, output_depth, name="fully_connected", weight_decay=0.0, stddev=1e-1):
 	with tf.variable_scope(name):
@@ -110,6 +243,9 @@ def fully_connected(x, output_depth, name="fully_connected", weight_decay=0.0, s
 		activation = tf.matmul(x, weights) + biases
 		out = tf.nn.relu(activation)
 	return out
+
+##
+# Outputs
 
 def softmax(x, output_depth, name="softmax", stddev=1e-1):
 	with tf.variable_scope(name):
@@ -142,11 +278,8 @@ def linear_regression(x, name="Linear_Regression", stddev=1e-1):
 		activation = tf.matmul(x, weights) + biases
 	return activation
 
-def l2_loss(tensor, weight=1.0, name=None):
-	with tf.name_scope(name):
-		weight = tf.convert_to_tensor(weight, dtype=tensor.dtype.base_dtype, name='loss_weight')
-		loss = tf.mul(weight, tf.nn.l2_loss(tensor), name='value')
-	return loss
+##
+# Pooling
 
 def max_pool(
 		x, 
@@ -210,63 +343,12 @@ def lp_pool(
 		out = tf.pow(subsample_sum, 1/p)
 		return out
 
+##
+# Activation Functions
+
 def leaky_relu(x, alpha=0.2, name="Leaky_ReLU"):
 	return tf.maximum(alpha * x, x)
 
-# def batch_norm(x, phase_train, epsilon=1e-3):
-# 	with tf.variable_scope("Batch_Norm"):
-# 		#phase_train = tf.convert_to_tensor(phase_train, dtype=tf.bool)
-# 		n_out = int(x.get_shape()[3])
-# 		print(n_out)
-# 		beta = tf.Variable(
-# 					tf.constant(0.0, shape=[n_out], dtype=x.dtype), 
-# 					name="beta", 
-# 					trainable=True, 
-# 					dtype=x.dtype
-# 				)
-# 		gamma = tf.Variable(
-# 					tf.constant(1.0, shape=[n_out], dtype=x.dtype), 
-# 					name="gamma", 
-# 					trainable=True, 
-# 					dtype=x.dtype
-# 				)
-# 		batch_mean, batch_var = tf.nn.moments(x, [0, 1, 2], name='moments')
-# 		ema = tf.train.ExponentialMovingAverage(decay=0.5)
-# 		def mean_var_with_update():
-# 			ema_apply_op = ema.apply([batch_mean, batch_var])
-# 			with tf.control_dependencies([ema_apply_op]):
-# 				return tf.identity(batch_mean), tf.identity(batch_var)
-# 		mean, var = control_flow_ops.cond(phase_train,
-# 										  mean_var_with_update,
-# 										  lambda: (ema.average(batch_mean), ema.average(batch_var)))
-# 		normed = tf.nn.batch_normalization(x, mean, var, beta, gamma, epsilon)
-# 	return normed
-
-# def batch_norm_layer(x,train_phase,scope_bn):
-# 	bn_train = batch_norm(
-# 		x, 
-# 		decay=0.9, 
-# 		center=True, 
-# 		scale=True,
-# 		is_training=True,
-# 		reuse=None,
-# 		trainable=True,
-# 		scope=scope_bn,
-# 		updates_collections=None)
-
-# 	bn_inference = batch_norm(
-# 		x, 
-# 		decay=0.9, 
-# 		center=True, 
-# 		scale=True,
-# 		is_training=False,
-# 		reuse=True,
-# 		trainable=True,
-# 		scope=scope_bn,
-# 		updates_collections=None)
-
-# 	z = tf.cond(train_phase, lambda: bn_train, lambda: bn_inference)
-# 	return z
 
 if __name__ == "__main__":
 	sess = tf.InteractiveSession()
@@ -280,13 +362,23 @@ if __name__ == "__main__":
 
 	x_image = tf.reshape(x, [-1, 28, 28, 1])
 
-	conv1 = convolution_and_bias(x_image, 32, [5, 5], name="c1")
+	#conv1 = convolution_and_bias(x_image, 32, [5, 5], name="c1")
+	conv1 = convolution2D(x_image, 32, [5, 5], name="c1", phase_train=phase_train, use_batch_norm=True)
+
+	#conv1 = batch_norm(conv1, phase_train)
 	h_conv1 = tf.nn.relu(conv1)
 
 	h_pool1 = max_pool(h_conv1)
 
-	conv2 = convolution_and_bias(h_pool1, 64, [5, 5], name="c2")
+	#conv2 = convolution_and_bias(h_pool1, 64, [5, 5], name="c2")
+	conv2 = convolution2D(h_pool1, 64, [5,5], name="c2", phase_train=phase_train, use_batch_norm=True)
+
+	#conv2 = batch_norm(conv2, phase_train)
 	h_conv2 = tf.nn.relu(conv2)
+
+	#conv3 = residual_block(h_conv2, 64, [3, 3], name="res")
+	#h_conv3 = tf.nn.relu(conv3)
+	#h_pool2 = max_pool(h_conv3)
 
 	h_pool2 = max_pool(h_conv2)
 
