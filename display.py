@@ -11,10 +11,11 @@ import copy
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import tensorflow as tf
 
-BATCH_SIZE = 48
+from Model import Model
+
+BATCH_SIZE = 12
 
 def draw_angle(image, angle, meaning="TRUTH"):
 	if meaning == "TRUTH":
@@ -113,11 +114,11 @@ def display(files, labels, model):
 
 
 if __name__ == "__main__":
-	paths = ["data/output/1", 
-	 	"data/output/2", 
-	 	"data/output/4",
-	 	"data/output/5",
-	 	"data/output/6"]
+	paths = ["data/output/1"]#, 
+	 	#"data/output/2", 
+	 	#"data/output/4",
+	 	#"data/output/5",
+	 	#"data/output/6"]
 	X_train, y_train = generate_dataset(paths)
 	sess = tf.Session()
 	network = Model(sess, X_train, y_train)

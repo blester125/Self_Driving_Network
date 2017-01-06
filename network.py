@@ -125,7 +125,7 @@ def residual_block(
 				activation = conv + biases
 			else:
 				activation = batch_norm(conv, phase_train)
-		res = x + activation
+		res = tf.add(x, activation)
 	return res
 
 
@@ -266,6 +266,7 @@ def softmax(x, output_depth, name="softmax", stddev=1e-1):
 def linear_regression(x, name="Linear_Regression", stddev=1e-1):
 	with tf.variable_scope(name):
 		input_depth = x.get_shape()[-1]
+		output_depth = 1
 		weights = tf.get_variable(
 			"weights",
 			[input_depth, 1],
@@ -365,7 +366,6 @@ if __name__ == "__main__":
 	#conv1 = convolution_and_bias(x_image, 32, [5, 5], name="c1")
 	conv1 = convolution2D(x_image, 32, [5, 5], name="c1", phase_train=phase_train, use_batch_norm=True)
 
-	#conv1 = batch_norm(conv1, phase_train)
 	h_conv1 = tf.nn.relu(conv1)
 
 	h_pool1 = max_pool(h_conv1)
@@ -373,7 +373,6 @@ if __name__ == "__main__":
 	#conv2 = convolution_and_bias(h_pool1, 64, [5, 5], name="c2")
 	conv2 = convolution2D(h_pool1, 64, [5,5], name="c2", phase_train=phase_train, use_batch_norm=True)
 
-	#conv2 = batch_norm(conv2, phase_train)
 	h_conv2 = tf.nn.relu(conv2)
 
 	#conv3 = residual_block(h_conv2, 64, [3, 3], name="res")
@@ -390,10 +389,14 @@ if __name__ == "__main__":
 	y_conv = softmax(h_fc1_drop, 10, name="softmax")
 
 	cross_entropy = tf.reduce_mean(-tf.reduce_sum(y_ * tf.log(y_conv), reduction_indices=[1]))
+	tf.scalar_summary('loss', cross_entropy)
 	train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
 	correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_,1))
 	accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 	init_op = tf.initialize_all_variables()
+
+	summary_op = tf.merge_all_summaries()
+	writer = tf.train.SummaryWriter("log", graph=sess.graph)
 
 	sess.run(init_op)
 	for i in range(5000):
@@ -411,5 +414,7 @@ if __name__ == "__main__":
 							y_:batch[1], 
 							keep_prob:0.5, 
 							phase_train:True})
+		summary = summary_op.eval(feed_dict={x:batch[0], y_:batch[1], keep_prob:0.5, phase_train:False})
+		writer.add_summary(summary)
 
 	print("Test Accuracy %g"%accuracy.eval(feed_dict={x:mnist.test.images, y_:mnist.test.labels, keep_prob:1.0, phase_train:False}))
