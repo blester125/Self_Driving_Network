@@ -38,6 +38,12 @@ def convolution2D(
 		conv = tf.nn.conv2d(x, kernel, [1, strides[0], strides[1], 1], padding=padding)
 		if use_batch_norm:
 			conv = batch_norm(conv, phase_train)
+		else:
+			biases = tf.get_variable(
+				initializer=tf.constant(0.1, shape=[output_depth]), 
+				name="biases", 
+				dtype=x.dtype)
+			conv = conv + biases
 	return conv
 
 def convolution_and_bias(
@@ -46,7 +52,7 @@ def convolution_and_bias(
 		kernel_size,
 		strides=[1, 1], 
 		padding='SAME',
-		name="convlution",
+		name="convolution",
 		weight_decay=0.0,
 		stddev=1e-1
 		):

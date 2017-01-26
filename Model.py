@@ -7,12 +7,22 @@ import tensorflow as tf
 import cv2
 import copy
 
-from network import *
+from Network import *
+from Preprocessing import *
 
 BATCH_SIZE = 12
 
 class Model():
-	def __init__(self, sess, X_train, y_train, batch_size=BATCH_SIZE):
+	def __init__(
+			self, 
+			sess, 
+			X_train, 
+			y_train,
+			X_val,
+			y_val, 
+			batch_size=BATCH_SIZE, 
+			mean=0, 
+			std=1):
 		self.sess = sess
 		self.X = tf.placeholder(tf.float32, shape=[None, 480, 640, 3], name="X")
 		self.y = tf.placeholder(tf.float32, shape=[None], name="y")
@@ -25,67 +35,99 @@ class Model():
 		
 		self.X_train = X_train
 		self.y_train = y_train
-		
+		self.X_val = X_val
+		self.y_val = y_val
+		self.mean = mean
+		self.std = std
+		self.batch_size = batch_size
+
 		self.saver = tf.train.Saver()
 		self.writer = tf.train.SummaryWriter("log", graph=self.sess.graph)
 		self.summary_op = tf.merge_all_summaries()
 		self.sess.run(tf.initialize_all_variables())
 
 	def train(self):
-		for epoch in range(1000):
-			#while l > .5 and epoch < 1500:
+		print("Starting Training")
+		#vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+		#for v in vars:
+		#	print(v.name)
+		step = 0
+		for epoch in range(5):
 			offset = 0
-			l = 0
 			while offset < len(self.X_train):
-				#l = 200
-				#epoch = 0
-				X_batch, y_batch = load_minibatch(self.X_train, self.y_train, offset)
-				#while l > .05 and epoch < 5000:
-				# Train
-				#test_v = [v for v in tf.all_variables()if v.name == "conv1_weights:0"]
-				#print(test_v)
-				#test_v = test_v[0]
-				#a = self.sess.run(test_v)
-				_, l, summary = self.sess.run([self.train_op, self.loss, self.summary_op], feed_dict={self.X: X_batch, self.y: y_batch, self.keep_prob: 0.1, self.phase_train: True})
-				#b = self.sess.run(test_v)
-				#print(np.array_equal(a, b))
-				#print(test)
-				#print("MiniBatch loss:", l)
-				
-				self.writer.add_summary(summary, offset)
-				#print("Finished minibatch with offset", offset)
-				# Update
+				X_batch, y_batch = load_minibatch(
+										self.X_train, 
+										self.y_train, 
+										offset, 
+										self.batch_size, 
+										self.mean, 
+										self.std, 
+										images=True)
+				_, l, summary = self.sess.run(
+									[self.train_op, 
+									 self.loss, 
+									 self.summary_op], 
+									 feed_dict={
+									 		self.X: X_batch, 
+									 		self.y: y_batch, 
+									 		self.keep_prob: 0.5, 
+									 		self.phase_train: True})
+				self.writer.add_summary(summary, step)
 				offset = min(offset + BATCH_SIZE, len(self.X_train))
+				step += 1
 			#if (epoch) % 50 == 0:
-			print("Epoch:", epoch, "Loss:", l)
+			
+			# Validation loss
+			offset = 0
+			total_loss = 0
+			count = 0
+			while offset < len(self.X_val):
+				X_val_batch, y_val_batch = load_minibatch(
+												self.X_val,
+												self.y_val,
+												offset,
+												self.batch_size,
+												self.mean,
+												self.std,
+												images=True)
+				l = self.sess.run(
+							self.loss, 
+							feed_dict={
+								self.X: X_val_batch, 
+								self.y: y_val_batch,
+								self.keep_prob: 1.0,
+								self.phase_train:True})
+				total_loss += l
+				count += 1
+				offset = min(offset + BATCH_SIZE, len(self.X_val))
+			total_loss = total_loss / count
+			print("Epoch:", epoch, "Loss:", total_loss)
 			self.saver.save(self.sess, "model.pkl")
-
-		#test = self.sess.run([self.prediction], feed_dict={self.X: X_batch, self.keep_prob:1.0})
-		#print(test)
-		print("Optimization Finished!")
-		self.saver.save(self.sess, "model.pkl")
+		print("Training Finished!")
 
 	def load(self, save_path):
 		self.saver.restore(self.sess, save_path)
 
 	def predict(self, image):
-		angle = self.sess.run(self.prediction, feed_dict={self.X: image, self.keep_prob: 1.0})
+		angle = self.sess.run(
+					self.prediction, 
+					feed_dict={
+						self.X: image, 
+						self.keep_prob: 1.0, 
+						self.phase_train: False})
 		return angle
+
+	def get_mean(self):
+		return self.mean
+
+	def get_std(self):
+		return self.std
 		
 		
 # TODO
-# Add Dropout
-# Rename stuff
-# Add Scopes
-# Divide res layers
-# Add res layers
-# initialize to better weights?
-# add more FC layers to reduce final layer fan in
 # Change Conv -> FC change to use convolutions
-# Added variables to FC lates
 # Use leaky relu
 
-# Use batch norm
 # Add LSTM or Gated Conv to the Fully connected parts
 # Predict more than steering angle, throttle and brake?
 # Use a small set of images to predict, like last 5 - 3D convolution
@@ -100,48 +142,108 @@ def inference(images, keep_prob, phase_train):
 	DEPTH6 = 512
 	OUTPUT_DEPTH = 1
 	
-	conv1 = convolution2D(images, DEPTH1, [7, 7], phase_train=phase_train, use_batch_norm=True, name="Conv1")
+	conv1 = convolution2D(
+				images, 
+				DEPTH1, 
+				[7, 7], 
+				phase_train=phase_train, 
+				use_batch_norm=True, 
+				name="Conv1")
 	conv1_o = tf.nn.relu(conv1)
 
-	res1 = residual_block(conv1_o, DEPTH1, [3, 3], phase_train=phase_train, use_batch_norm=True, name="Res1")
+	pool1 = max_pool(conv1_o, name="Pool1")
+
+	res1 = residual_block(
+				pool1, DEPTH1, 
+				[3, 3], 
+				phase_train=phase_train, 
+				use_batch_norm=True, 
+				name="Res1")
 	res1_o = tf.nn.relu(res1)
 
-	conv2 = convolution2D(res1_o, DEPTH2, [3, 3], phase_train=phase_train, use_batch_norm=True, name="Conv2")
+	conv2 = convolution2D(
+				res1_o, 
+				DEPTH2, 
+				[3, 3], 
+				phase_train=phase_train, 
+				use_batch_norm=True, 
+				name="Conv2")
 	conv2_o = tf.nn.relu(conv2)
 
-	pool1 = max_pool(conv2_o, name="Pool1")
+	pool2 = max_pool(conv2_o, name="Pool2")
 
-	res2 = residual_block(pool1, DEPTH2, [3, 3], phase_train=phase_train, use_batch_norm=True, name="Res2")
+	res2 = residual_block(
+					pool2, 
+					DEPTH2, 
+					[3, 3], 
+					phase_train=phase_train, 
+					use_batch_norm=True, 
+					name="Res2")
 	res2_o = tf.nn.relu(res2)
 
-	pool2 = max_pool(res2_o, name="Pool2")
+	pool3 = max_pool(res2_o, name="Pool3")
 
-	conv3 = convolution2D(pool2, DEPTH3, [3, 3], phase_train=phase_train, use_batch_norm=True, name="Conv3")
+	conv3 = convolution2D(
+					pool3, 
+					DEPTH3, 
+					[3, 3], 
+					phase_train=phase_train, 
+					use_batch_norm=True, 
+					name="Conv3")
 	conv3_o = tf.nn.relu(conv3)
 
-	pool3 = max_pool(conv3_o, name="Pool3")
+	pool4 = max_pool(conv3_o, name="Pool4")
 
-	res3 = residual_block(pool3, DEPTH3, [3, 3], phase_train=phase_train, use_batch_norm=True, name="Res3")
-	res3_o = tf.nn.relu(res3)
+	# res3 = residual_block(
+	# 			pool4, 
+	# 			DEPTH3, 
+	# 			[3, 3], 
+	# 			phase_train=phase_train, 
+	# 			use_batch_norm=True, 
+	# 			name="Res3")
+	# res3_o = tf.nn.relu(res3)
 
-	conv4 = convolution2D(res3_o, DEPTH4, [3, 3], phase_train=phase_train, use_batch_norm=True, name="Conv4")
+	conv4 = convolution2D(
+					pool4, 
+					DEPTH4, 
+					[3, 3], 
+					phase_train=phase_train, 
+					use_batch_norm=True, 
+					name="Conv4")
 	conv4_o = tf.nn.relu(conv4)
 
-	pool4 = max_pool(conv4_o, name="Pool4")
+	pool5 = max_pool(conv4_o, name="Pool5")
 
-	res4 = residual_block(pool4, DEPTH4, [3, 3], phase_train=phase_train, use_batch_norm=True, name="Res4")
-	res4_o = tf.nn.relu(res4)
+	# res4 = residual_block(
+	# 			pool5, 
+	# 			DEPTH4, 
+	# 			[3, 3], 
+	# 			phase_train=phase_train, 
+	# 			use_batch_norm=True, 
+	# 			name="Res4")
+	# res4_o = tf.nn.relu(res4)
 
-	conv5 = convolution2D(res4_o, DEPTH5, [3, 3], phase_train=phase_train, use_batch_norm=True, name="Conv5")
+	conv5 = convolution2D(
+					pool5, 
+					DEPTH5, 
+					[3, 3], 
+					phase_train=phase_train, 
+					use_batch_norm=True, 
+					name="Conv5")
 	conv5_o = tf.nn.relu(conv5)
 
-	pool5 = max_pool(conv5_o, name="Pool5")
+	pool6 = max_pool(conv5_o, name="Pool6")
 
-	conv6 = convolution2D(pool5, DEPTH6, [3, 3], phase_train=phase_train, use_batch_norm=True, name="Conv6")
+	conv6 = convolution2D(
+					pool6, 
+					DEPTH6, 
+					[3, 3], 
+					phase_train=phase_train, 
+					use_batch_norm=True, 
+					name="Conv6")
 	conv6_o = tf.nn.relu(conv6)
 
-	pool6 = max_pool(conv6_o, name="Pool6")
-	pool7 = max_pool(pool6, name="Pool7")
+	pool7 = max_pool(conv6_o, name="Pool7")
 	pool8 = max_pool(pool7, name="Pool8")
 
 	#Flatten
@@ -168,41 +270,14 @@ def inference(images, keep_prob, phase_train):
 	
 
 def loss(prediction, y):
-	#print(tf.reshape(prediction, [-1]), y)
-	loss = tf.reduce_sum(tf.pow((tf.transpose(tf.reshape(prediction, [-1])) - y), 2))
-	tf.scalar_summary("loss", loss)
-	return loss
+	with tf.variable_scope("Loss"):
+		loss = tf.reduce_sum(tf.pow((tf.transpose(tf.reshape(prediction, [-1])) - y), 2))
+		tf.scalar_summary("loss", loss)
+		return loss
 
 def train(total_loss):
-	# global_step = tf.Variable(0)
-	# learning_rate = tf.train.exponential_decay(0.05, global_step, 10000, 0.95)
-	# return tf.train.AdagradOptimizer(learning_rate).minimize(total_loss, global_step=global_step)
-	return tf.train.AdamOptimizer(1e-4).minimize(total_loss)
-
-def load_minibatch(X_train, y_train, offset):
-	y_batch = np.array(y_train[offset:min(offset + BATCH_SIZE, len(X_train))])
-	X_batch = []
-	for i in range(BATCH_SIZE):
-		if offset + i >= len(X_train):
-			break
-		image = load_image(X_train[offset+i])
-		X_batch.append(image)
-	X_batch = np.array(X_batch)
-	return X_batch, y_batch
-
-def normalize_image(image):
-	norm_image = copy.deepcopy(image)
-	norm_image = cv2.normalize(
-						image, 
-						norm_image, 
-						alpha=0, 
-						beta=1, 
-						norm_type=cv2.NORM_MINMAX, 
-						dtype=cv2.CV_32F)
-	return norm_image
-
-def load_image(path, normalize=True):
-	image = cv2.imread(path)
-	if normalize:
-		image = normalize_image(image)
-	return image
+	with tf.variable_scope("Train"):
+		global_step = tf.Variable(0)
+		learning_rate = tf.train.exponential_decay(0.05, global_step, 10000, 0.95)
+		return tf.train.AdagradOptimizer(learning_rate).minimize(total_loss, global_step=global_step)
+	#return tf.train.AdamOptimizer(1e-4).minimize(total_loss)
