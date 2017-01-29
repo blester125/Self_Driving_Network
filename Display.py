@@ -88,13 +88,14 @@ def draw_angle(image, angle, meaning="TRUTH"):
 	return image
 
 if __name__ == "__main__":
-	paths = ["data/output/1"]#, 
-	 	#"data/output/2", 
-	 	#"data/output/4",
-	 	#"data/output/5",
-	 	#"data/output/6"]
+	paths = ["data/output/1", 
+	 	"data/output/2", 
+	 	"data/output/4",
+	 	"data/output/5",
+	 	"data/output/6"]
 	X_train, X_val, y_train, y_val, mean, std = generate_dataset(paths)
 	sess = tf.Session()
+
 	network = Model(sess, X_train, y_train, X_val, y_val, mean=mean, std=std)
 	if sys.argv[1] == "train":
 		network.train()

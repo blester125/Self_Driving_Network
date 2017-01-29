@@ -7,10 +7,14 @@ import tensorflow as tf
 import cv2
 import copy
 
+import matplotlib.pyplot as plt
+
 from Network import *
 from Preprocessing import *
 
 BATCH_SIZE = 12
+tf.set_random_seed(1234)
+
 
 class Model():
 	def __init__(
@@ -48,12 +52,15 @@ class Model():
 
 	def train(self):
 		print("Starting Training")
+		train_loss = []
+		valid_loss = []
 		#vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
 		#for v in vars:
 		#	print(v.name)
 		step = 0
-		for epoch in range(5):
+		for epoch in range(50):
 			offset = 0
+			l = 0
 			while offset < len(self.X_train):
 				X_batch, y_batch = load_minibatch(
 										self.X_train, 
@@ -76,7 +83,7 @@ class Model():
 				offset = min(offset + BATCH_SIZE, len(self.X_train))
 				step += 1
 			#if (epoch) % 50 == 0:
-			
+			train_loss.append([step, l])
 			# Validation loss
 			offset = 0
 			total_loss = 0
@@ -101,8 +108,18 @@ class Model():
 				count += 1
 				offset = min(offset + BATCH_SIZE, len(self.X_val))
 			total_loss = total_loss / count
+			valid_loss.append([step, total_loss])
 			print("Epoch:", epoch, "Loss:", total_loss)
 			self.saver.save(self.sess, "model.pkl")
+		plt.plot(
+				[x[0] for x in train_loss], 
+				[y[1] for y in train_loss],
+				'b',
+				[a[0] for a in valid_loss], 
+				[b[1] for b in valid_loss],
+				'r')
+		plt.title("Training and Validation Accuracy")
+		plt.show()
 		print("Training Finished!")
 
 	def load(self, save_path):
@@ -194,17 +211,17 @@ def inference(images, keep_prob, phase_train):
 
 	pool4 = max_pool(conv3_o, name="Pool4")
 
-	# res3 = residual_block(
-	# 			pool4, 
-	# 			DEPTH3, 
-	# 			[3, 3], 
-	# 			phase_train=phase_train, 
-	# 			use_batch_norm=True, 
-	# 			name="Res3")
-	# res3_o = tf.nn.relu(res3)
+	res3 = residual_block(
+				pool4, 
+				DEPTH3, 
+				[3, 3], 
+				phase_train=phase_train, 
+				use_batch_norm=True, 
+				name="Res3")
+	res3_o = tf.nn.relu(res3)
 
 	conv4 = convolution2D(
-					pool4, 
+					res3_o, 
 					DEPTH4, 
 					[3, 3], 
 					phase_train=phase_train, 
@@ -214,17 +231,17 @@ def inference(images, keep_prob, phase_train):
 
 	pool5 = max_pool(conv4_o, name="Pool5")
 
-	# res4 = residual_block(
-	# 			pool5, 
-	# 			DEPTH4, 
-	# 			[3, 3], 
-	# 			phase_train=phase_train, 
-	# 			use_batch_norm=True, 
-	# 			name="Res4")
-	# res4_o = tf.nn.relu(res4)
+	res4 = residual_block(
+				pool5, 
+				DEPTH4, 
+				[3, 3], 
+				phase_train=phase_train, 
+				use_batch_norm=True, 
+				name="Res4")
+	res4_o = tf.nn.relu(res4)
 
 	conv5 = convolution2D(
-					pool5, 
+					res4_o, 
 					DEPTH5, 
 					[3, 3], 
 					phase_train=phase_train, 
